@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { NamoPayProvider } from "@/components/namopay-provider";
 
 export const metadata: Metadata = {
   title: "NamoPay",
@@ -13,9 +14,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body>{children}</body>
+    <html lang="en" suppressHydrationWarning>
+      <body>
+        <NamoPayProvider>{children}</NamoPayProvider>
+      </body>
     </html>
   );
 }
-
