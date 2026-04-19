@@ -1,6 +1,18 @@
-import Link from "next/link";
+"use client";
+
+import { useRouter } from "next/navigation";
+import { useNamoPay } from "@/components/namopay-provider";
 
 export default function Home() {
+  const router = useRouter();
+  const { setSelectedMode, clearActionMessage } = useNamoPay();
+
+  function chooseMode(mode: "online" | "offline") {
+    setSelectedMode(mode);
+    clearActionMessage();
+    router.push("/dashboard");
+  }
+
   return (
     <main className="shell landing-shell">
       <section className="landing-hero">
@@ -8,27 +20,26 @@ export default function Home() {
           <p className="eyebrow">NamoPay</p>
           <h1 className="landing-title">Choose how you want to move money today.</h1>
           <p className="subtle landing-subtle">
-            Start with a premium mode picker, then move into a guided dashboard, dedicated send and receive flows, and secure QR and Bluetooth integrations.
+            Start with a mode picker, continue into the dashboard, then move through send, receive, QR, Bluetooth, and secure offline payment steps.
           </p>
         </div>
 
         <div className="mode-choice-grid">
-          <Link href="/dashboard?mode=online" className="mode-choice mode-online">
+          <button className="mode-choice mode-online" onClick={() => chooseMode("online")}>
             <p className="eyebrow">Online</p>
             <h2>Instant UPI-style payments</h2>
             <p>Bank-linked transfers, QR scans, requests, smart analytics, and rewards.</p>
             <span>Continue to Online Dashboard</span>
-          </Link>
+          </button>
 
-          <Link href="/dashboard?mode=offline" className="mode-choice mode-offline">
+          <button className="mode-choice mode-offline" onClick={() => chooseMode("offline")}>
             <p className="eyebrow">Offline</p>
             <h2>Pay without internet</h2>
             <p>Dynamic QR, Bluetooth pairing, transaction codes, wallet limits, and sync protection.</p>
             <span>Continue to Offline Dashboard</span>
-          </Link>
+          </button>
         </div>
       </section>
     </main>
   );
 }
-

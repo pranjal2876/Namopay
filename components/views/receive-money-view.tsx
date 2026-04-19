@@ -1,11 +1,33 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useNamoPay } from "@/components/namopay-provider";
 import { formatCurrency } from "@/lib/format";
 
 export function ReceiveMoneyView() {
-  const { txAmount, setTxAmount, overview } = useNamoPay();
+  const router = useRouter();
+  const {
+    txAmount,
+    txTarget,
+    setTxAmount,
+    setTxTarget,
+    overview,
+    requestMoney,
+    createPaymentLink,
+    sendSplitReminder,
+    actionMessage
+  } = useNamoPay();
+
+  function handleRequest() {
+    requestMoney();
+    router.push("/dashboard");
+  }
+
+  function handleLink() {
+    createPaymentLink();
+    router.push("/integrations/qr");
+  }
 
   return (
     <section className="page-stack">
@@ -20,17 +42,28 @@ export function ReceiveMoneyView() {
         </div>
       </section>
 
+      {actionMessage ? (
+        <div className="notification-item success">
+          <strong>Collection status</strong>
+          <p>{actionMessage}</p>
+        </div>
+      ) : null}
+
       <section className="route-grid">
         <article className="panel">
           <p className="eyebrow">Request money</p>
           <h3>Share amount with one tap</h3>
           <label>
+            Contact
+            <input value={txTarget} onChange={(event) => setTxTarget(event.target.value)} />
+          </label>
+          <label>
             Request amount
             <input value={txAmount} onChange={(event) => setTxAmount(event.target.value)} />
           </label>
           <div className="button-row">
-            <button className="primary">Request from contact</button>
-            <button className="secondary">Create payment link</button>
+            <button className="primary" onClick={handleRequest}>Request from contact</button>
+            <button className="secondary" onClick={handleLink}>Create payment link</button>
           </div>
         </article>
 
@@ -41,7 +74,7 @@ export function ReceiveMoneyView() {
             <strong>Weekend villa</strong>
             <p>Rahul paid {formatCurrency(2200)} • Ananya pending {formatCurrency(2200)}</p>
           </div>
-          <button className="ghost action-block">Send reminder</button>
+          <button className="ghost action-block" onClick={sendSplitReminder}>Send reminder</button>
         </article>
 
         <article className="panel">
@@ -54,4 +87,3 @@ export function ReceiveMoneyView() {
     </section>
   );
 }
-

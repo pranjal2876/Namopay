@@ -13,6 +13,7 @@ import {
 import { categorySpending, monthlySpending, overviewData } from "@/lib/mock-data";
 import {
   Language,
+  Mode,
   NotificationItem,
   OverviewPayload,
   RewardCard,
@@ -23,6 +24,7 @@ import {
 type NamoPayContextValue = {
   theme: ThemeMode;
   language: Language;
+  selectedMode: Mode;
   overview: OverviewPayload;
   offlineWallet: number;
   offlineQueue: Transaction[];
@@ -39,6 +41,7 @@ type NamoPayContextValue = {
   txTarget: string;
   txAmount: string;
   scratchOpened: boolean;
+  actionMessage: string;
   allTransactions: Transaction[];
   filteredTransactions: Transaction[];
   pendingOfflineAmount: number;
@@ -53,18 +56,23 @@ type NamoPayContextValue = {
   categorySpending: typeof categorySpending;
   setTheme: (theme: ThemeMode) => void;
   setLanguage: (language: Language) => void;
+  setSelectedMode: (mode: Mode) => void;
   setBudget: (value: number) => void;
   setSearch: (value: string) => void;
   setChatInput: (value: string) => void;
   setVoiceCommand: (value: string) => void;
   setTxTarget: (value: string) => void;
   setTxAmount: (value: string) => void;
-  createTransaction: (channel: Transaction["channel"], offline?: boolean) => void;
+  createTransaction: (channel: Transaction["channel"], offline?: boolean) => boolean;
   syncOfflineQueue: () => Promise<void>;
   rechargeOfflineWallet: () => void;
   submitAssistant: (event: FormEvent) => Promise<void>;
   submitVoice: (event: FormEvent) => Promise<void>;
   unlockScratchCard: () => void;
+  requestMoney: () => void;
+  createPaymentLink: () => void;
+  sendSplitReminder: () => void;
+  clearActionMessage: () => void;
 };
 
 const NamoPayContext = createContext<NamoPayContextValue | null>(null);
@@ -90,6 +98,7 @@ function addAmountToBalance(current: OverviewPayload, amount: number) {
 export function NamoPayProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<ThemeMode>("dark");
   const [language, setLanguage] = useState<Language>("en");
+  const [selectedMode, setSelectedMode] = useState<Mode>("online");
   const [overview, setOverview] = useState<OverviewPayload>(overviewData);
   const [offlineWallet, setOfflineWallet] = useState(overviewData.offlineBalance);
   const [offlineQueue, setOfflineQueue] = useState<Transaction[]>([]);
@@ -108,6 +117,7 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
   const [txTarget, setTxTarget] = useState("rahul@upi");
   const [txAmount, setTxAmount] = useState("500");
   const [scratchOpened, setScratchOpened] = useState(false);
+  const [actionMessage, setActionMessage] = useState("");
 
   useEffect(() => {
     void fetch("/api/overview")
@@ -123,10 +133,12 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const savedTheme = window.localStorage.getItem("namopay-theme") as ThemeMode | null;
     const savedLanguage = window.localStorage.getItem("namopay-language") as Language | null;
+    const savedMode = window.localStorage.getItem("namopay-mode") as Mode | null;
     const savedQueue = window.localStorage.getItem("namopay-offline-queue");
     const savedWallet = window.localStorage.getItem("namopay-offline-wallet");
     if (savedTheme) setTheme(savedTheme);
     if (savedLanguage) setLanguage(savedLanguage);
+    if (savedMode) setSelectedMode(savedMode);
     if (savedQueue) setOfflineQueue(JSON.parse(savedQueue) as Transaction[]);
     if (savedWallet) setOfflineWallet(Number(savedWallet));
   }, []);
@@ -138,9 +150,10 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     window.localStorage.setItem("namopay-language", language);
+    window.localStorage.setItem("namopay-mode", selectedMode);
     window.localStorage.setItem("namopay-offline-wallet", String(offlineWallet));
     window.localStorage.setItem("namopay-offline-queue", JSON.stringify(offlineQueue));
-  }, [language, offlineWallet, offlineQueue]);
+  }, [language, selectedMode, offlineWallet, offlineQueue]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -210,7 +223,10 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
 
   function createTransaction(channel: Transaction["channel"], offline = false) {
     const amount = Number(txAmount || 0);
-    if (!amount) return;
+    if (!amount) {
+      setActionMessage("Enter an amount before continuing.");
+      return false;
+    }
     const suspicious = runFraudCheck(amount, txTarget);
     const entry: Transaction = {
       id: `TXN-${Math.floor(Math.random() * 90000) + 10000}`,
@@ -234,7 +250,8 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
           tone: "warning",
           detail: "Recharge online before making this offline payment."
         });
-        return;
+        setActionMessage("Offline wallet balance is too low for this payment.");
+        return false;
       }
       setOfflineWallet((current) => current - amount);
       setOfflineQueue((current) => [entry, ...current]);
@@ -247,7 +264,8 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
       if (channel === "Bluetooth") {
         setBluetoothStatus("Secure pairing complete • Transfer queued");
       }
-      return;
+      setActionMessage(`Offline payment queued via ${channel}.`);
+      return true;
     }
 
     setOverview((current) => ({
@@ -260,6 +278,8 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
       tone: "success",
       detail: `₹${amount.toLocaleString("en-IN")} sent to ${txTarget}.`
     });
+    setActionMessage(`₹${amount.toLocaleString("en-IN")} sent successfully to ${txTarget}.`);
+    return true;
   }
 
   async function syncOfflineQueue() {
@@ -291,6 +311,9 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
         ? `${successful.length} synced, ${failed.length} needs review.`
         : "All offline transactions synced successfully."
     });
+    setActionMessage(
+      failed.length ? `${successful.length} payments synced, ${failed.length} need review.` : "All offline payments synced successfully."
+    );
   }
 
   function rechargeOfflineWallet() {
@@ -303,6 +326,7 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
       tone: "success",
       detail: "₹500 moved to your offline wallet."
     });
+    setActionMessage("Offline wallet recharged with ₹500.");
   }
 
   async function submitAssistant(event: FormEvent) {
@@ -333,11 +357,49 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
       current.map((item, index) => (index === 0 ? { ...item, cashback: "You won ₹120 cashback" } : item))
     );
     setOverview((current) => ({ ...current, cashbackEarned: current.cashbackEarned + 120 }));
+    setActionMessage("Scratch card opened. ₹120 cashback has been added.");
+  }
+
+  function requestMoney() {
+    const amount = Number(txAmount || 0);
+    setActionMessage(`Payment request for ₹${amount.toLocaleString("en-IN")} sent to ${txTarget}.`);
+    addNotification({
+      id: crypto.randomUUID(),
+      title: "Request sent",
+      tone: "info",
+      detail: `Requested ₹${amount.toLocaleString("en-IN")} from ${txTarget}.`
+    });
+  }
+
+  function createPaymentLink() {
+    const amount = Number(txAmount || 0);
+    setActionMessage(`Collection link created for ₹${amount.toLocaleString("en-IN")}.`);
+    addNotification({
+      id: crypto.randomUUID(),
+      title: "Payment link ready",
+      tone: "success",
+      detail: `Shareable link generated for ₹${amount.toLocaleString("en-IN")}.`
+    });
+  }
+
+  function sendSplitReminder() {
+    setActionMessage("Reminder sent to pending group members.");
+    addNotification({
+      id: crypto.randomUUID(),
+      title: "Reminder sent",
+      tone: "info",
+      detail: "Split bill reminder has been sent to pending members."
+    });
+  }
+
+  function clearActionMessage() {
+    setActionMessage("");
   }
 
   const value: NamoPayContextValue = {
     theme,
     language,
+    selectedMode,
     overview,
     offlineWallet,
     offlineQueue,
@@ -354,6 +416,7 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
     txTarget,
     txAmount,
     scratchOpened,
+    actionMessage,
     allTransactions,
     filteredTransactions,
     pendingOfflineAmount,
@@ -368,6 +431,7 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
     categorySpending,
     setTheme,
     setLanguage,
+    setSelectedMode,
     setBudget,
     setSearch,
     setChatInput,
@@ -379,7 +443,11 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
     rechargeOfflineWallet,
     submitAssistant,
     submitVoice,
-    unlockScratchCard
+    unlockScratchCard,
+    requestMoney,
+    createPaymentLink,
+    sendSplitReminder,
+    clearActionMessage
   };
 
   return <NamoPayContext.Provider value={value}>{children}</NamoPayContext.Provider>;

@@ -1,9 +1,18 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useNamoPay } from "@/components/namopay-provider";
 
 export function SecureIdIntegrationView() {
-  const { qrSeconds, createTransaction } = useNamoPay();
+  const router = useRouter();
+  const { qrSeconds, createTransaction, actionMessage } = useNamoPay();
+
+  function handleSecureId() {
+    const success = createTransaction("Offline ID", true);
+    if (success) {
+      router.push("/dashboard");
+    }
+  }
 
   return (
     <section className="page-stack">
@@ -17,6 +26,13 @@ export function SecureIdIntegrationView() {
         </div>
       </section>
 
+      {actionMessage ? (
+        <div className="notification-item success">
+          <strong>Secure ID status</strong>
+          <p>{actionMessage}</p>
+        </div>
+      ) : null}
+
       <section className="dashboard-grid">
         <article className="panel large">
           <div className="token-card">
@@ -29,7 +45,7 @@ export function SecureIdIntegrationView() {
         <article className="panel">
           <p className="eyebrow">Use code</p>
           <h3>Queue payment</h3>
-          <button className="primary" onClick={() => createTransaction("Offline ID", true)}>Use secure ID</button>
+          <button className="primary" onClick={handleSecureId}>Use secure ID</button>
         </article>
       </section>
     </section>

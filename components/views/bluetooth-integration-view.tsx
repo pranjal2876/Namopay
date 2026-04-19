@@ -1,9 +1,18 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useNamoPay } from "@/components/namopay-provider";
 
 export function BluetoothIntegrationView() {
-  const { bluetoothStatus, createTransaction } = useNamoPay();
+  const router = useRouter();
+  const { bluetoothStatus, createTransaction, actionMessage } = useNamoPay();
+
+  function handleBluetoothTransfer() {
+    const success = createTransaction("Bluetooth", true);
+    if (success) {
+      router.push("/dashboard");
+    }
+  }
 
   return (
     <section className="page-stack">
@@ -16,6 +25,13 @@ export function BluetoothIntegrationView() {
           </div>
         </div>
       </section>
+
+      {actionMessage ? (
+        <div className="notification-item success">
+          <strong>Bluetooth status</strong>
+          <p>{actionMessage}</p>
+        </div>
+      ) : null}
 
       <section className="dashboard-grid">
         <article className="panel large">
@@ -34,7 +50,7 @@ export function BluetoothIntegrationView() {
           <p className="eyebrow">Ready to transfer</p>
           <h3>Secure handshake</h3>
           <p className="subtle">Use a signed pairing event, then queue the offline movement for later sync verification.</p>
-          <button className="primary" onClick={() => createTransaction("Bluetooth", true)}>Pair and transfer</button>
+          <button className="primary" onClick={handleBluetoothTransfer}>Pair and transfer</button>
         </article>
       </section>
     </section>

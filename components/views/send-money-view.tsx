@@ -1,11 +1,20 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useNamoPay } from "@/components/namopay-provider";
 import { formatCurrency } from "@/lib/format";
 
 export function SendMoneyView() {
-  const { txTarget, txAmount, setTxTarget, setTxAmount, createTransaction, notifications } = useNamoPay();
+  const router = useRouter();
+  const { txTarget, txAmount, setTxTarget, setTxAmount, createTransaction, notifications, actionMessage } = useNamoPay();
+
+  function handleSend(channel: "UPI" | "Phone" | "Merchant") {
+    const success = createTransaction(channel);
+    if (success) {
+      router.push("/dashboard");
+    }
+  }
 
   return (
     <section className="page-stack">
@@ -22,6 +31,13 @@ export function SendMoneyView() {
           </div>
         </div>
       </section>
+
+      {actionMessage ? (
+        <div className="notification-item success">
+          <strong>Transfer status</strong>
+          <p>{actionMessage}</p>
+        </div>
+      ) : null}
 
       <section className="dashboard-grid">
         <article className="panel large">
@@ -42,9 +58,9 @@ export function SendMoneyView() {
             </label>
           </div>
           <div className="button-row">
-            <button className="primary" onClick={() => createTransaction("UPI")}>Send via UPI</button>
-            <button className="secondary" onClick={() => createTransaction("Phone")}>Send via phone</button>
-            <button className="ghost" onClick={() => createTransaction("Merchant")}>Pay merchant</button>
+            <button className="primary" onClick={() => handleSend("UPI")}>Send via UPI</button>
+            <button className="secondary" onClick={() => handleSend("Phone")}>Send via phone</button>
+            <button className="ghost" onClick={() => handleSend("Merchant")}>Pay merchant</button>
           </div>
         </article>
 

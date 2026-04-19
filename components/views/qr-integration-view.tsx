@@ -1,9 +1,18 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useNamoPay } from "@/components/namopay-provider";
 
 export function QRIntegrationView() {
-  const { qrSeconds, qrProgress, qrRingColor, qrPayload, txAmount, setTxAmount, createTransaction } = useNamoPay();
+  const router = useRouter();
+  const { qrSeconds, qrProgress, qrRingColor, qrPayload, txAmount, setTxAmount, createTransaction, actionMessage } = useNamoPay();
+
+  function handleQueueQr() {
+    const success = createTransaction("QR", true);
+    if (success) {
+      router.push("/dashboard");
+    }
+  }
 
   return (
     <section className="page-stack">
@@ -16,6 +25,13 @@ export function QRIntegrationView() {
           </div>
         </div>
       </section>
+
+      {actionMessage ? (
+        <div className="notification-item success">
+          <strong>QR status</strong>
+          <p>{actionMessage}</p>
+        </div>
+      ) : null}
 
       <section className="dashboard-grid">
         <article className="panel large">
@@ -45,7 +61,7 @@ export function QRIntegrationView() {
             Amount
             <input value={txAmount} onChange={(event) => setTxAmount(event.target.value)} />
           </label>
-          <button className="primary" onClick={() => createTransaction("QR", true)}>Queue offline QR payment</button>
+          <button className="primary" onClick={handleQueueQr}>Queue offline QR payment</button>
           <p className="subtle">Payload includes amount, wallet ID, timestamp, and a one-time anti-reuse token.</p>
         </article>
       </section>
