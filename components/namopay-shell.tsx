@@ -26,6 +26,7 @@ const navItems: Array<{ href: Route; label: string }> = [
 export function NamoPayShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const {
+    currentUser,
     theme,
     language,
     setTheme,
@@ -35,7 +36,8 @@ export function NamoPayShell({ children }: { children: ReactNode }) {
     offlineQueue,
     pinUnlocked,
     setPinUnlocked,
-    selectedMode
+    selectedMode,
+    signOut
   } = useNamoPay();
 
   return (
@@ -54,8 +56,12 @@ export function NamoPayShell({ children }: { children: ReactNode }) {
             <p className="subtle">
               Hybrid payments with guided flows, secure offline rails, and premium blue-purple polish.
             </p>
+            <p className="subtle">{currentUser?.email}</p>
           </div>
           <div className="header-actions">
+            <button className="ghost" onClick={signOut}>
+              Log Out
+            </button>
             <button className={clsx("ghost", pinUnlocked && "active")} onClick={() => setPinUnlocked(!pinUnlocked)}>
               {pinUnlocked ? "Session Unlocked" : "Unlock Secure Session"}
             </button>

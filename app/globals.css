@@ -120,6 +120,11 @@ input::placeholder {
   gap: 1.5rem;
 }
 
+.auth-hero {
+  grid-template-columns: 1.1fr 0.9fr;
+  align-items: center;
+}
+
 .landing-copy,
 .hero-top,
 .panel-header,
@@ -283,6 +288,15 @@ h3 {
   justify-content: center;
 }
 
+.back-button {
+  min-width: 96px;
+}
+
+.shell-toolbar {
+  display: flex;
+  justify-content: flex-start;
+}
+
 .mobile-nav {
   position: sticky;
   bottom: 0.75rem;
@@ -301,6 +315,25 @@ h3 {
   display: grid;
   gap: 1rem;
   margin-top: 1rem;
+}
+
+.auth-card {
+  padding: 1.5rem;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  display: grid;
+  gap: 1rem;
+}
+
+.auth-tabs {
+  display: flex;
+  gap: 0.8rem;
+}
+
+.auth-form {
+  display: grid;
+  gap: 1rem;
 }
 
 .hero-card {
@@ -630,6 +663,10 @@ h3 {
   .route-grid-wide,
   .reward-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .auth-hero {
+    grid-template-columns: repeat(1, minmax(0, 1fr));
   }
 }
 

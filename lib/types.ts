@@ -4,6 +4,14 @@ export type ThemeMode = "dark" | "light";
 
 export type Language = "en" | "hi";
 
+export type AuthUser = {
+  id: string;
+  name: string;
+  email: string;
+  passwordHash: string;
+  createdAt: string;
+};
+
 export type TransactionStatus = "Success" | "Pending" | "Failed";
 
 export type TransactionChannel =

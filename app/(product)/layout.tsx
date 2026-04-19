@@ -1,7 +1,7 @@
 import { ReactNode } from "react";
-import { NamoPayShell } from "@/components/namopay-shell";
+import { ProtectedProduct } from "@/components/protected-product";
 
 export default function ProductLayout({ children }: { children: ReactNode }) {
-  return <NamoPayShell>{children}</NamoPayShell>;
+  return <ProtectedProduct>{children}</ProtectedProduct>;
 }
 

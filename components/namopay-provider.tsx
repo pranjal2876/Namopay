@@ -14,6 +14,7 @@ import {
 import { categorySpending, monthlySpending, overviewData } from "@/lib/mock-data";
 import {
   AssistantMessage,
+  AuthUser,
   DevicePeer,
   InsightItem,
   Language,
@@ -27,7 +28,33 @@ import {
 } from "@/lib/types";
 import { formatCurrency } from "@/lib/format";
 
+type StoredAppState = {
+  overview: OverviewPayload;
+  offlineWallet: number;
+  offlineQueue: Transaction[];
+  notifications: NotificationItem[];
+  rewards: RewardCard[];
+  insights: InsightItem[];
+  devices: DevicePeer[];
+  splitRooms: SplitRoom[];
+  assistantMessages: AssistantMessage[];
+  budget: number;
+  language: Language;
+  selectedMode: Mode;
+  theme: ThemeMode;
+  pinUnlocked: boolean;
+};
+
+type AuthPayload = {
+  name: string;
+  email: string;
+  password: string;
+};
+
 type NamoPayContextValue = {
+  authReady: boolean;
+  currentUser: AuthUser | null;
+  authError: string;
   theme: ThemeMode;
   language: Language;
   selectedMode: Mode;
@@ -66,6 +93,10 @@ type NamoPayContextValue = {
   qrPayload: string;
   monthlySpending: typeof monthlySpending;
   categorySpending: typeof categorySpending;
+  signUp: (payload: AuthPayload) => Promise<boolean>;
+  signIn: (payload: Omit<AuthPayload, "name">) => Promise<boolean>;
+  signOut: () => void;
+  clearAuthError: () => void;
   setTheme: (theme: ThemeMode) => void;
   setLanguage: (language: Language) => void;
   setSelectedMode: (mode: Mode) => void;
@@ -94,6 +125,9 @@ type NamoPayContextValue = {
 
 const NamoPayContext = createContext<NamoPayContextValue | null>(null);
 
+const USERS_KEY = "namopay-auth-users";
+const SESSION_KEY = "namopay-auth-session";
+
 function categoryForTarget(target: string): Transaction["category"] {
   const normalized = target.toLowerCase();
   if (normalized.includes("cafe") || normalized.includes("food")) return "Food";
@@ -120,7 +154,47 @@ function createAssistantReply(message: string, budgetPercent: number) {
   return "You are on track overall. Food, shopping, and delayed offline sync are the biggest levers to improve this month.";
 }
 
+function appStateKey(userId: string) {
+  return `namopay-app-state-${userId}`;
+}
+
+function defaultStoredState(): StoredAppState {
+  return {
+    overview: overviewData,
+    offlineWallet: overviewData.offlineBalance,
+    offlineQueue: [],
+    notifications: overviewData.notifications,
+    rewards: overviewData.rewards,
+    insights: overviewData.insights,
+    devices: overviewData.devices,
+    splitRooms: overviewData.splitRooms,
+    assistantMessages: [
+      {
+        id: "A1",
+        role: "assistant",
+        text: "Hi, I can help with spending, offline sync, and where to save more this month."
+      }
+    ],
+    budget: overviewData.monthlyBudget,
+    language: "en",
+    selectedMode: "online",
+    theme: "dark",
+    pinUnlocked: false
+  };
+}
+
+async function hashPassword(value: string) {
+  const buffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(buffer))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 export function NamoPayProvider({ children }: { children: ReactNode }) {
+  const [authReady, setAuthReady] = useState(false);
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [authError, setAuthError] = useState("");
+
   const [theme, setTheme] = useState<ThemeMode>("dark");
   const [language, setLanguage] = useState<Language>("en");
   const [selectedMode, setSelectedMode] = useState<Mode>("online");
@@ -132,13 +206,7 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
   const [insights, setInsights] = useState<InsightItem[]>(overviewData.insights);
   const [devices, setDevices] = useState<DevicePeer[]>(overviewData.devices);
   const [splitRooms, setSplitRooms] = useState<SplitRoom[]>(overviewData.splitRooms);
-  const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([
-    {
-      id: "A1",
-      role: "assistant",
-      text: "Hi Pranjal, I can help with spending, offline sync, and where to save more this month."
-    }
-  ]);
+  const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>(defaultStoredState().assistantMessages);
   const [budget, setBudget] = useState(overviewData.monthlyBudget);
   const [search, setSearch] = useState("");
   const [chatInput, setChatInput] = useState("How much did I spend this week?");
@@ -156,48 +224,101 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
   const [activeDeviceId, setActiveDeviceId] = useState(overviewData.devices[0]?.id ?? "");
   const [pinUnlocked, setPinUnlocked] = useState(false);
 
-  useEffect(() => {
-    void fetch("/api/overview")
-      .then((res) => res.json())
-      .then((data: OverviewPayload) => {
-        setOverview(data);
-        setOfflineWallet(data.offlineBalance);
-        setBudget(data.monthlyBudget);
-        setRewards(data.rewards);
-        setInsights(data.insights);
-        setDevices(data.devices);
-        setSplitRooms(data.splitRooms);
-      })
-      .catch(() => setOverview(overviewData));
-  }, []);
+  function clearVolatileState() {
+    setSearch("");
+    setChatInput("How much did I spend this week?");
+    setChatReply("You spent Rs 6,420 this week. Food is rising faster than your usual pattern.");
+    setVoiceCommand("Send 500 to Rahul");
+    setVoiceResult("Awaiting command");
+    setBluetoothStatus("Choose a trusted device to start an offline transfer.");
+    setQrSeconds(300);
+    setTxTarget("rahul@upi");
+    setTxAmount("500");
+    setScratchOpened(false);
+    setActionMessage("");
+  }
+
+  function applyStoredState(user: AuthUser, state?: StoredAppState) {
+    const nextState = state ?? defaultStoredState();
+    setTheme(nextState.theme);
+    setLanguage(nextState.language);
+    setSelectedMode(nextState.selectedMode);
+    setOfflineWallet(nextState.offlineWallet);
+    setOfflineQueue(nextState.offlineQueue);
+    setNotifications(nextState.notifications);
+    setRewards(nextState.rewards);
+    setInsights(nextState.insights);
+    setDevices(nextState.devices);
+    setSplitRooms(nextState.splitRooms);
+    setAssistantMessages(nextState.assistantMessages);
+    setBudget(nextState.budget);
+    setPinUnlocked(nextState.pinUnlocked);
+    setOverview({
+      ...nextState.overview,
+      user: user.name
+    });
+    setActiveDeviceId(nextState.devices[0]?.id ?? "");
+    clearVolatileState();
+  }
 
   useEffect(() => {
-    const savedTheme = window.localStorage.getItem("namopay-theme") as ThemeMode | null;
-    const savedLanguage = window.localStorage.getItem("namopay-language") as Language | null;
-    const savedMode = window.localStorage.getItem("namopay-mode") as Mode | null;
-    const savedQueue = window.localStorage.getItem("namopay-offline-queue");
-    const savedWallet = window.localStorage.getItem("namopay-offline-wallet");
-    const savedUnlock = window.localStorage.getItem("namopay-pin-unlocked");
-    if (savedTheme) setTheme(savedTheme);
-    if (savedLanguage) setLanguage(savedLanguage);
-    if (savedMode) setSelectedMode(savedMode);
-    if (savedQueue) setOfflineQueue(JSON.parse(savedQueue) as Transaction[]);
-    if (savedWallet) setOfflineWallet(Number(savedWallet));
-    if (savedUnlock) setPinUnlocked(savedUnlock === "true");
+    const savedSession = window.localStorage.getItem(SESSION_KEY);
+    const savedUsers = JSON.parse(window.localStorage.getItem(USERS_KEY) ?? "[]") as AuthUser[];
+
+    if (savedSession) {
+      const session = JSON.parse(savedSession) as { userId: string };
+      const user = savedUsers.find((item) => item.id === session.userId) ?? null;
+      if (user) {
+        const rawState = window.localStorage.getItem(appStateKey(user.id));
+        const storedState = rawState ? (JSON.parse(rawState) as StoredAppState) : defaultStoredState();
+        setCurrentUser(user);
+        applyStoredState(user, storedState);
+      }
+    }
+
+    setAuthReady(true);
   }, []);
 
   useEffect(() => {
     document.body.dataset.theme = theme;
-    window.localStorage.setItem("namopay-theme", theme);
   }, [theme]);
 
   useEffect(() => {
-    window.localStorage.setItem("namopay-language", language);
-    window.localStorage.setItem("namopay-mode", selectedMode);
-    window.localStorage.setItem("namopay-offline-wallet", String(offlineWallet));
-    window.localStorage.setItem("namopay-offline-queue", JSON.stringify(offlineQueue));
-    window.localStorage.setItem("namopay-pin-unlocked", String(pinUnlocked));
-  }, [language, selectedMode, offlineWallet, offlineQueue, pinUnlocked]);
+    if (!currentUser) return;
+    const payload: StoredAppState = {
+      overview: { ...overview, user: currentUser.name },
+      offlineWallet,
+      offlineQueue,
+      notifications,
+      rewards,
+      insights,
+      devices,
+      splitRooms,
+      assistantMessages,
+      budget,
+      language,
+      selectedMode,
+      theme,
+      pinUnlocked
+    };
+    window.localStorage.setItem(appStateKey(currentUser.id), JSON.stringify(payload));
+  }, [
+    currentUser,
+    overview,
+    offlineWallet,
+    offlineQueue,
+    notifications,
+    rewards,
+    insights,
+    devices,
+    splitRooms,
+    assistantMessages,
+    budget,
+    language,
+    selectedMode,
+    theme,
+    pinUnlocked
+  ]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -246,6 +367,80 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
     })
   );
 
+  async function signUp(payload: AuthPayload) {
+    const users = JSON.parse(window.localStorage.getItem(USERS_KEY) ?? "[]") as AuthUser[];
+    const exists = users.some((item) => item.email.toLowerCase() === payload.email.toLowerCase());
+    if (exists) {
+      setAuthError("An account with this email already exists.");
+      return false;
+    }
+
+    const user: AuthUser = {
+      id: crypto.randomUUID(),
+      name: payload.name.trim(),
+      email: payload.email.trim().toLowerCase(),
+      passwordHash: await hashPassword(payload.password),
+      createdAt: new Date().toISOString()
+    };
+    const nextUsers = [...users, user];
+    window.localStorage.setItem(USERS_KEY, JSON.stringify(nextUsers));
+    window.localStorage.setItem(SESSION_KEY, JSON.stringify({ userId: user.id }));
+    const stored = defaultStoredState();
+    stored.overview = { ...stored.overview, user: user.name };
+    window.localStorage.setItem(appStateKey(user.id), JSON.stringify(stored));
+    setCurrentUser(user);
+    setAuthError("");
+    applyStoredState(user, stored);
+    return true;
+  }
+
+  async function signIn(payload: Omit<AuthPayload, "name">) {
+    const users = JSON.parse(window.localStorage.getItem(USERS_KEY) ?? "[]") as AuthUser[];
+    const user = users.find((item) => item.email.toLowerCase() === payload.email.trim().toLowerCase());
+    if (!user) {
+      setAuthError("No account found with that email.");
+      return false;
+    }
+    const passwordHash = await hashPassword(payload.password);
+    if (passwordHash !== user.passwordHash) {
+      setAuthError("Incorrect password. Please try again.");
+      return false;
+    }
+
+    window.localStorage.setItem(SESSION_KEY, JSON.stringify({ userId: user.id }));
+    const rawState = window.localStorage.getItem(appStateKey(user.id));
+    const storedState = rawState ? (JSON.parse(rawState) as StoredAppState) : defaultStoredState();
+    setCurrentUser(user);
+    setAuthError("");
+    applyStoredState(user, storedState);
+    return true;
+  }
+
+  function signOut() {
+    window.localStorage.removeItem(SESSION_KEY);
+    setCurrentUser(null);
+    setAuthError("");
+    setOverview({ ...overviewData, user: "Guest" });
+    setOfflineWallet(overviewData.offlineBalance);
+    setOfflineQueue([]);
+    setNotifications(overviewData.notifications);
+    setRewards(overviewData.rewards);
+    setInsights(overviewData.insights);
+    setDevices(overviewData.devices);
+    setSplitRooms(overviewData.splitRooms);
+    setAssistantMessages(defaultStoredState().assistantMessages);
+    setBudget(overviewData.monthlyBudget);
+    setTheme("dark");
+    setLanguage("en");
+    setSelectedMode("online");
+    setPinUnlocked(false);
+    clearVolatileState();
+  }
+
+  function clearAuthError() {
+    setAuthError("");
+  }
+
   function addNotification(item: NotificationItem) {
     setNotifications((current) => [item, ...current].slice(0, 8));
   }
@@ -267,6 +462,10 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
 
   function createTransaction(channel: Transaction["channel"], offline = false) {
     const amount = Number(txAmount || 0);
+    if (!currentUser) {
+      setActionMessage("Sign in to continue.");
+      return false;
+    }
     if (!pinUnlocked) {
       setActionMessage("Unlock secure session before making payments.");
       return false;
@@ -522,6 +721,9 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
   }
 
   const value: NamoPayContextValue = {
+    authReady,
+    currentUser,
+    authError,
     theme,
     language,
     selectedMode,
@@ -560,6 +762,10 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
     qrPayload,
     monthlySpending,
     categorySpending,
+    signUp,
+    signIn,
+    signOut,
+    clearAuthError,
     setTheme,
     setLanguage,
     setSelectedMode,
