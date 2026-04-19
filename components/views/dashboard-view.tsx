@@ -93,6 +93,12 @@ export function DashboardView() {
 
       <section className="route-grid route-grid-wide">
         <RouteCard
+          href="/accounts"
+          eyebrow="Banking"
+          title="Accounts"
+          description="Inspect linked banks, UPI handles, and the real funding layer behind payments."
+        />
+        <RouteCard
           href="/payments/send"
           eyebrow="Move money"
           title="Send money"
@@ -111,10 +117,22 @@ export function DashboardView() {
           description="Run device pairing, secure IDs, and dynamic QR-based offline transfers."
         />
         <RouteCard
+          href="/utilities"
+          eyebrow="Everyday pay"
+          title="Utilities"
+          description="Recharge mobile, pay bills, and jump into prepared merchant payments."
+        />
+        <RouteCard
           href="/passbook"
           eyebrow="History"
           title="Digital passbook"
           description="Search transactions, inspect outcomes, and export your statement."
+        />
+        <RouteCard
+          href="/security"
+          eyebrow="Trust"
+          title="Security center"
+          description="Review secure-session state, device trust, and fraud notifications."
         />
       </section>
 

@@ -5,18 +5,22 @@ import type { Route } from "next";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
 import { ReactNode } from "react";
+import { BackButton } from "@/components/back-button";
 import { useNamoPay } from "@/components/namopay-provider";
 import { getGreeting } from "@/lib/format";
 
 const navItems: Array<{ href: Route; label: string }> = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/accounts", label: "Accounts" },
+  { href: "/utilities", label: "Utilities" },
   { href: "/payments/send", label: "Send" },
   { href: "/payments/receive", label: "Receive" },
   { href: "/integrations", label: "Integrations" },
   { href: "/passbook", label: "Passbook" },
   { href: "/rewards", label: "Rewards" },
   { href: "/assistant", label: "Assistant" },
-  { href: "/sync-center", label: "Sync" }
+  { href: "/sync-center", label: "Sync" },
+  { href: "/security", label: "Security" }
 ];
 
 export function NamoPayShell({ children }: { children: ReactNode }) {
@@ -37,6 +41,10 @@ export function NamoPayShell({ children }: { children: ReactNode }) {
   return (
     <main className="shell shell-spaced">
       <section className="app-frame">
+        <div className="shell-toolbar">
+          <BackButton fallback={pathname === "/dashboard" ? "/" : "/dashboard"} />
+        </div>
+
         <header className="app-header">
           <div>
             <p className="eyebrow">NamoPay</p>
@@ -78,7 +86,7 @@ export function NamoPayShell({ children }: { children: ReactNode }) {
         {children}
 
         <nav className="mobile-nav">
-          {navItems.slice(0, 5).map((item) => (
+          {[navItems[0], navItems[3], navItems[4], navItems[5], navItems[10]].map((item) => (
             <Link key={item.href} href={item.href} className={clsx("mobile-nav-link", pathname === item.href && "selected")}>
               {item.label}
             </Link>
