@@ -53,6 +53,7 @@ export type RewardCard = {
   title: string;
   cashback: string;
   unlocked: boolean;
+  coinsCost?: number;
 };
 
 export type MerchantSummary = {
@@ -60,6 +61,39 @@ export type MerchantSummary = {
   monthRevenue: number;
   completionRate: number;
   avgTicket: number;
+};
+
+export type DevicePeer = {
+  id: string;
+  name: string;
+  trust: "trusted" | "new";
+  lastSeen: string;
+  battery: number;
+};
+
+export type InsightItem = {
+  id: string;
+  title: string;
+  detail: string;
+  tone: "info" | "warning" | "success";
+};
+
+export type SplitRoom = {
+  id: string;
+  title: string;
+  total: number;
+  pendingCount: number;
+  members: Array<{
+    name: string;
+    amount: number;
+    paid: boolean;
+  }>;
+};
+
+export type AssistantMessage = {
+  id: string;
+  role: "user" | "assistant";
+  text: string;
 };
 
 export type OverviewPayload = {
@@ -74,5 +108,7 @@ export type OverviewPayload = {
   notifications: NotificationItem[];
   rewards: RewardCard[];
   merchant: MerchantSummary;
+  insights: InsightItem[];
+  devices: DevicePeer[];
+  splitRooms: SplitRoom[];
 };
-

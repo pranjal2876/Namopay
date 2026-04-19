@@ -1,5 +1,6 @@
 "use client";
 
+import { jsPDF } from "jspdf";
 import {
   createContext,
   FormEvent,
@@ -12,14 +13,19 @@ import {
 } from "react";
 import { categorySpending, monthlySpending, overviewData } from "@/lib/mock-data";
 import {
+  AssistantMessage,
+  DevicePeer,
+  InsightItem,
   Language,
   Mode,
   NotificationItem,
   OverviewPayload,
   RewardCard,
+  SplitRoom,
   ThemeMode,
   Transaction
 } from "@/lib/types";
+import { formatCurrency } from "@/lib/format";
 
 type NamoPayContextValue = {
   theme: ThemeMode;
@@ -30,6 +36,10 @@ type NamoPayContextValue = {
   offlineQueue: Transaction[];
   notifications: NotificationItem[];
   rewards: RewardCard[];
+  insights: InsightItem[];
+  devices: DevicePeer[];
+  splitRooms: SplitRoom[];
+  assistantMessages: AssistantMessage[];
   budget: number;
   search: string;
   chatInput: string;
@@ -42,6 +52,8 @@ type NamoPayContextValue = {
   txAmount: string;
   scratchOpened: boolean;
   actionMessage: string;
+  activeDeviceId: string;
+  pinUnlocked: boolean;
   allTransactions: Transaction[];
   filteredTransactions: Transaction[];
   pendingOfflineAmount: number;
@@ -63,6 +75,8 @@ type NamoPayContextValue = {
   setVoiceCommand: (value: string) => void;
   setTxTarget: (value: string) => void;
   setTxAmount: (value: string) => void;
+  setActiveDeviceId: (id: string) => void;
+  setPinUnlocked: (value: boolean) => void;
   createTransaction: (channel: Transaction["channel"], offline?: boolean) => boolean;
   syncOfflineQueue: () => Promise<void>;
   rechargeOfflineWallet: () => void;
@@ -71,8 +85,11 @@ type NamoPayContextValue = {
   unlockScratchCard: () => void;
   requestMoney: () => void;
   createPaymentLink: () => void;
-  sendSplitReminder: () => void;
+  sendSplitReminder: (roomId?: string) => void;
   clearActionMessage: () => void;
+  exportPassbook: () => void;
+  redeemReward: (rewardId: string) => void;
+  pairActiveDevice: () => void;
 };
 
 const NamoPayContext = createContext<NamoPayContextValue | null>(null);
@@ -86,13 +103,21 @@ function categoryForTarget(target: string): Transaction["category"] {
   return "Transfer";
 }
 
-function addAmountToBalance(current: OverviewPayload, amount: number) {
-  return {
-    ...current,
-    bankBalance: current.bankBalance - amount,
-    cashbackEarned: current.cashbackEarned + Math.round(amount * 0.01),
-    rewardCoins: current.rewardCoins + Math.round(amount / 10)
-  };
+function createAssistantReply(message: string, budgetPercent: number) {
+  const input = message.toLowerCase();
+  if (input.includes("week")) {
+    return "You spent Rs 6,420 this week. Food was your biggest category, followed by travel and merchant purchases.";
+  }
+  if (input.includes("save")) {
+    return "To save more, reduce weekend food spending and route bigger payments through reward-eligible merchants.";
+  }
+  if (input.includes("budget")) {
+    return `You have used ${budgetPercent}% of your monthly budget. Keeping the rest of this week under Rs 2,600 will keep you on track.`;
+  }
+  if (input.includes("offline")) {
+    return "Your offline wallet is healthy, but syncing queued payments today will reduce fraud review risk.";
+  }
+  return "You are on track overall. Food, shopping, and delayed offline sync are the biggest levers to improve this month.";
 }
 
 export function NamoPayProvider({ children }: { children: ReactNode }) {
@@ -104,20 +129,32 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
   const [offlineQueue, setOfflineQueue] = useState<Transaction[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>(overviewData.notifications);
   const [rewards, setRewards] = useState<RewardCard[]>(overviewData.rewards);
+  const [insights, setInsights] = useState<InsightItem[]>(overviewData.insights);
+  const [devices, setDevices] = useState<DevicePeer[]>(overviewData.devices);
+  const [splitRooms, setSplitRooms] = useState<SplitRoom[]>(overviewData.splitRooms);
+  const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([
+    {
+      id: "A1",
+      role: "assistant",
+      text: "Hi Pranjal, I can help with spending, offline sync, and where to save more this month."
+    }
+  ]);
   const [budget, setBudget] = useState(overviewData.monthlyBudget);
   const [search, setSearch] = useState("");
   const [chatInput, setChatInput] = useState("How much did I spend this week?");
   const [chatReply, setChatReply] = useState(
-    "You spent ₹6,420 this week. Food is rising faster than your usual pattern."
+    "You spent Rs 6,420 this week. Food is rising faster than your usual pattern."
   );
-  const [voiceCommand, setVoiceCommand] = useState("Send ₹500 to Rahul");
+  const [voiceCommand, setVoiceCommand] = useState("Send 500 to Rahul");
   const [voiceResult, setVoiceResult] = useState("Awaiting command");
-  const [bluetoothStatus, setBluetoothStatus] = useState("Nearby trusted device: Rahul's Phone");
+  const [bluetoothStatus, setBluetoothStatus] = useState("Choose a trusted device to start an offline transfer.");
   const [qrSeconds, setQrSeconds] = useState(300);
   const [txTarget, setTxTarget] = useState("rahul@upi");
   const [txAmount, setTxAmount] = useState("500");
   const [scratchOpened, setScratchOpened] = useState(false);
   const [actionMessage, setActionMessage] = useState("");
+  const [activeDeviceId, setActiveDeviceId] = useState(overviewData.devices[0]?.id ?? "");
+  const [pinUnlocked, setPinUnlocked] = useState(false);
 
   useEffect(() => {
     void fetch("/api/overview")
@@ -126,6 +163,10 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
         setOverview(data);
         setOfflineWallet(data.offlineBalance);
         setBudget(data.monthlyBudget);
+        setRewards(data.rewards);
+        setInsights(data.insights);
+        setDevices(data.devices);
+        setSplitRooms(data.splitRooms);
       })
       .catch(() => setOverview(overviewData));
   }, []);
@@ -136,11 +177,13 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
     const savedMode = window.localStorage.getItem("namopay-mode") as Mode | null;
     const savedQueue = window.localStorage.getItem("namopay-offline-queue");
     const savedWallet = window.localStorage.getItem("namopay-offline-wallet");
+    const savedUnlock = window.localStorage.getItem("namopay-pin-unlocked");
     if (savedTheme) setTheme(savedTheme);
     if (savedLanguage) setLanguage(savedLanguage);
     if (savedMode) setSelectedMode(savedMode);
     if (savedQueue) setOfflineQueue(JSON.parse(savedQueue) as Transaction[]);
     if (savedWallet) setOfflineWallet(Number(savedWallet));
+    if (savedUnlock) setPinUnlocked(savedUnlock === "true");
   }, []);
 
   useEffect(() => {
@@ -153,7 +196,8 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
     window.localStorage.setItem("namopay-mode", selectedMode);
     window.localStorage.setItem("namopay-offline-wallet", String(offlineWallet));
     window.localStorage.setItem("namopay-offline-queue", JSON.stringify(offlineQueue));
-  }, [language, selectedMode, offlineWallet, offlineQueue]);
+    window.localStorage.setItem("namopay-pin-unlocked", String(pinUnlocked));
+  }, [language, selectedMode, offlineWallet, offlineQueue, pinUnlocked]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -203,7 +247,7 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
   );
 
   function addNotification(item: NotificationItem) {
-    setNotifications((current) => [item, ...current].slice(0, 6));
+    setNotifications((current) => [item, ...current].slice(0, 8));
   }
 
   function runFraudCheck(amount: number, target: string) {
@@ -223,10 +267,15 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
 
   function createTransaction(channel: Transaction["channel"], offline = false) {
     const amount = Number(txAmount || 0);
+    if (!pinUnlocked) {
+      setActionMessage("Unlock secure session before making payments.");
+      return false;
+    }
     if (!amount) {
       setActionMessage("Enter an amount before continuing.");
       return false;
     }
+
     const suspicious = runFraudCheck(amount, txTarget);
     const entry: Transaction = {
       id: `TXN-${Math.floor(Math.random() * 90000) + 10000}`,
@@ -253,37 +302,46 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
         setActionMessage("Offline wallet balance is too low for this payment.");
         return false;
       }
+
       setOfflineWallet((current) => current - amount);
       setOfflineQueue((current) => [entry, ...current]);
       addNotification({
         id: crypto.randomUUID(),
         title: "Offline payment queued",
         tone: "info",
-        detail: `₹${amount.toLocaleString("en-IN")} queued for sync using ${channel}.`
+        detail: `${formatCurrency(amount)} queued for sync using ${channel}.`
       });
       if (channel === "Bluetooth") {
-        setBluetoothStatus("Secure pairing complete • Transfer queued");
+        const activeDevice = devices.find((item) => item.id === activeDeviceId);
+        setBluetoothStatus(`${activeDevice?.name ?? "Trusted device"} paired securely and transfer queued.`);
       }
       setActionMessage(`Offline payment queued via ${channel}.`);
       return true;
     }
 
     setOverview((current) => ({
-      ...addAmountToBalance(current, amount),
+      ...current,
+      bankBalance: current.bankBalance - amount,
+      cashbackEarned: current.cashbackEarned + Math.round(amount * 0.01),
+      rewardCoins: current.rewardCoins + Math.round(amount / 10),
       transactions: [entry, ...current.transactions]
     }));
     addNotification({
       id: crypto.randomUUID(),
       title: "Payment sent",
       tone: "success",
-      detail: `₹${amount.toLocaleString("en-IN")} sent to ${txTarget}.`
+      detail: `${formatCurrency(amount)} sent to ${txTarget}.`
     });
-    setActionMessage(`₹${amount.toLocaleString("en-IN")} sent successfully to ${txTarget}.`);
+    setActionMessage(`${formatCurrency(amount)} sent successfully to ${txTarget}.`);
     return true;
   }
 
   async function syncOfflineQueue() {
-    if (!offlineQueue.length) return;
+    if (!offlineQueue.length) {
+      setActionMessage("No offline transactions are waiting to sync.");
+      return;
+    }
+
     const response = await fetch("/api/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -301,18 +359,24 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
     const failed = offlineQueue
       .filter((item) => failedIds.has(item.id))
       .map((item) => ({ ...item, status: "Failed" as const }));
-    setOverview((current) => ({ ...current, transactions: [...successful, ...current.transactions] }));
+
+    setOverview((current) => ({
+      ...current,
+      transactions: [...successful, ...current.transactions]
+    }));
     setOfflineQueue(failed);
     addNotification({
       id: crypto.randomUUID(),
       title: "Offline sync complete",
       tone: failed.length ? "warning" : "success",
       detail: failed.length
-        ? `${successful.length} synced, ${failed.length} needs review.`
+        ? `${successful.length} synced, ${failed.length} needs manual review.`
         : "All offline transactions synced successfully."
     });
     setActionMessage(
-      failed.length ? `${successful.length} payments synced, ${failed.length} need review.` : "All offline payments synced successfully."
+      failed.length
+        ? `${successful.length} payments synced, ${failed.length} require review.`
+        : "All offline payments synced successfully."
     );
   }
 
@@ -324,9 +388,9 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
       id: crypto.randomUUID(),
       title: "Offline wallet recharged",
       tone: "success",
-      detail: "₹500 moved to your offline wallet."
+      detail: `${formatCurrency(amount)} moved to your offline wallet.`
     });
-    setActionMessage("Offline wallet recharged with ₹500.");
+    setActionMessage("Offline wallet recharged with Rs 500.");
   }
 
   async function submitAssistant(event: FormEvent) {
@@ -337,7 +401,16 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ message: chatInput })
     });
     const data = (await response.json()) as { reply: string };
-    startTransition(() => setChatReply(data.reply));
+    const reply = data.reply || createAssistantReply(chatInput, budgetPercent);
+    startTransition(() => {
+      setChatReply(reply);
+      setAssistantMessages((current) => [
+        ...current,
+        { id: crypto.randomUUID(), role: "user", text: chatInput },
+        { id: crypto.randomUUID(), role: "assistant", text: reply }
+      ]);
+      setChatInput("");
+    });
   }
 
   async function submitVoice(event: FormEvent) {
@@ -348,48 +421,100 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ command: voiceCommand })
     });
     const data = (await response.json()) as { interpreted: string; status: string };
-    setVoiceResult(`${data.interpreted} • ${data.status}`);
+    const finalStatus = `${data.interpreted} • ${data.status}`;
+    setVoiceResult(finalStatus);
+    setActionMessage(finalStatus);
   }
 
   function unlockScratchCard() {
     setScratchOpened(true);
     setRewards((current) =>
-      current.map((item, index) => (index === 0 ? { ...item, cashback: "You won ₹120 cashback" } : item))
+      current.map((item, index) => (index === 0 ? { ...item, cashback: "You won Rs 120 cashback" } : item))
     );
     setOverview((current) => ({ ...current, cashbackEarned: current.cashbackEarned + 120 }));
-    setActionMessage("Scratch card opened. ₹120 cashback has been added.");
+    setActionMessage("Scratch card opened. Rs 120 cashback has been added.");
   }
 
   function requestMoney() {
     const amount = Number(txAmount || 0);
-    setActionMessage(`Payment request for ₹${amount.toLocaleString("en-IN")} sent to ${txTarget}.`);
+    setActionMessage(`Payment request for ${formatCurrency(amount)} sent to ${txTarget}.`);
     addNotification({
       id: crypto.randomUUID(),
       title: "Request sent",
       tone: "info",
-      detail: `Requested ₹${amount.toLocaleString("en-IN")} from ${txTarget}.`
+      detail: `Requested ${formatCurrency(amount)} from ${txTarget}.`
     });
   }
 
   function createPaymentLink() {
     const amount = Number(txAmount || 0);
-    setActionMessage(`Collection link created for ₹${amount.toLocaleString("en-IN")}.`);
+    setActionMessage(`Collection link created for ${formatCurrency(amount)}.`);
     addNotification({
       id: crypto.randomUUID(),
       title: "Payment link ready",
       tone: "success",
-      detail: `Shareable link generated for ₹${amount.toLocaleString("en-IN")}.`
+      detail: `Shareable link generated for ${formatCurrency(amount)}.`
     });
   }
 
-  function sendSplitReminder() {
-    setActionMessage("Reminder sent to pending group members.");
+  function sendSplitReminder(roomId?: string) {
+    const room = splitRooms.find((item) => item.id === roomId) ?? splitRooms[0];
+    setActionMessage(`Reminder sent for ${room.title}.`);
     addNotification({
       id: crypto.randomUUID(),
       title: "Reminder sent",
       tone: "info",
-      detail: "Split bill reminder has been sent to pending members."
+      detail: `Split bill reminder has been sent for ${room.title}.`
     });
+  }
+
+  function exportPassbook() {
+    const doc = new jsPDF();
+    doc.setFontSize(18);
+    doc.text("NamoPay Digital Passbook", 14, 18);
+    doc.setFontSize(10);
+    doc.text(`Generated on ${new Date().toLocaleString("en-IN")}`, 14, 26);
+    filteredTransactions.slice(0, 12).forEach((item, index) => {
+      doc.text(
+        `${index + 1}. ${item.title} | ${item.channel} | ${item.status} | ${formatCurrency(item.amount)}`,
+        14,
+        40 + index * 8
+      );
+    });
+    doc.save("namopay-passbook.pdf");
+    setActionMessage("Passbook PDF exported.");
+  }
+
+  function redeemReward(rewardId: string) {
+    const reward = rewards.find((item) => item.id === rewardId);
+    if (!reward || !reward.coinsCost) return;
+    const coinsCost = reward.coinsCost;
+    if (overview.rewardCoins < coinsCost) {
+      setActionMessage("Not enough coins to redeem this reward yet.");
+      return;
+    }
+    setOverview((current) => ({
+      ...current,
+      rewardCoins: current.rewardCoins - coinsCost,
+      cashbackEarned: current.cashbackEarned + 75
+    }));
+    addNotification({
+      id: crypto.randomUUID(),
+      title: "Reward redeemed",
+      tone: "success",
+      detail: `${reward.title} redeemed successfully.`
+    });
+    setActionMessage(`${reward.title} redeemed successfully.`);
+  }
+
+  function pairActiveDevice() {
+    const device = devices.find((item) => item.id === activeDeviceId);
+    if (!device) return;
+    setDevices((current) =>
+      current.map((item) => (item.id === device.id ? { ...item, trust: "trusted" } : item))
+    );
+    setBluetoothStatus(`${device.name} paired and trusted for offline transfers.`);
+    setActionMessage(`${device.name} is now paired for Bluetooth payments.`);
   }
 
   function clearActionMessage() {
@@ -405,6 +530,10 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
     offlineQueue,
     notifications,
     rewards,
+    insights,
+    devices,
+    splitRooms,
+    assistantMessages,
     budget,
     search,
     chatInput,
@@ -417,6 +546,8 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
     txAmount,
     scratchOpened,
     actionMessage,
+    activeDeviceId,
+    pinUnlocked,
     allTransactions,
     filteredTransactions,
     pendingOfflineAmount,
@@ -438,6 +569,8 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
     setVoiceCommand,
     setTxTarget,
     setTxAmount,
+    setActiveDeviceId,
+    setPinUnlocked,
     createTransaction,
     syncOfflineQueue,
     rechargeOfflineWallet,
@@ -447,7 +580,10 @@ export function NamoPayProvider({ children }: { children: ReactNode }) {
     requestMoney,
     createPaymentLink,
     sendSplitReminder,
-    clearActionMessage
+    clearActionMessage,
+    exportPassbook,
+    redeemReward,
+    pairActiveDevice
   };
 
   return <NamoPayContext.Provider value={value}>{children}</NamoPayContext.Provider>;

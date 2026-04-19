@@ -74,7 +74,7 @@ export function ReceiveMoneyView() {
             <strong>Weekend villa</strong>
             <p>Rahul paid {formatCurrency(2200)} • Ananya pending {formatCurrency(2200)}</p>
           </div>
-          <button className="ghost action-block" onClick={sendSplitReminder}>Send reminder</button>
+          <button className="ghost action-block" onClick={() => sendSplitReminder()}>Send reminder</button>
         </article>
 
         <article className="panel">
